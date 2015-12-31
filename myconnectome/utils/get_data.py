@@ -1,41 +1,37 @@
 """
 get_data.py: functions to download data for myconnectome project from cloudfront archive
 Options:
-    --all: get all basic data needed for analysis
-    --rawfunc: get raw fMRI data
-    --diffusion: get raw diffusion data
-    --anatomy: get raw anatomical data
+    -b/--base: get base data for analysis
+    -a/--all: get base data and results from analysis
     -h: print this help message
 """
 
 import os,getopt,sys
-import urllib
-import re
 import datetime
 import tempfile
 
 from getmd5sum import getmd5sum
-from myconnectome.utils.run_shell_cmd import run_shell_cmd
 from myconnectome.utils.download_file import DownloadFile
 
 def timestamp():
     return datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
 
-#dataurl='http://d2bmty58oscepi.cloudfront.net'
 dataurl='http://s3-us-west-2.amazonaws.com/myconnectome/base'
 
 basefileurl=dataurl+'/basefilelist_md5.txt'
 
 basedir=os.environ['MYCONNECTOME_DIR']
+
 basefile=os.path.join(basedir,'basefilelist_md5.txt')
 
-#dataurl='http://web.stanford.edu/group/poldracklab/myconnectome-data'
+dirname_listdict={'bct':'http://s3-us-west-2.amazonaws.com/myconnectome/base/bctlist_md5.txt',
+                  'david':'http://s3-us-west-2.amazonaws.com/myconnectome/base/davidfilelist_md5.txt'}
 
-dirname_listdict={'bct':'https://s3-us-west-2.amazonaws.com/myconnectome/base/bctlist_md5.txt',
-                  'david':'https://s3-us-west-2.amazonaws.com/myconnectome/base/davidfilelist_md5.txt'}
+def get_list_data(listfileurl,dataurl,logfile=None,
+                  skip=[],overwrite=False,verbose=False):
 
-def get_list_data(listfileurl,logfile=None,overwrite=False,verbose=False):
-
+    if not logfile:
+        print 'no logging..'
     # get base list
     tmpfile=tempfile.mkstemp()
     os.close(tmpfile[0])
@@ -45,8 +41,14 @@ def get_list_data(listfileurl,logfile=None,overwrite=False,verbose=False):
     os.remove(tmpfile[1])
     
     for b in basefiles:
-        if os.path.exists(os.path.join(basedir,b[0])) and not overwrite:
-            
+        skipfile=False
+        for s in skip:
+            if  b[0].find(s)>-1:
+                print 'skipping',b[0]
+                skipfile=True
+        if skipfile:
+            continue
+        if os.path.exists(os.path.join(basedir,b[0])) and not overwrite:            
             md5sum=getmd5sum(os.path.join(basedir,b[0]))
             if verbose:
                 print 'existing file',b[0],md5sum,b[1]
@@ -60,13 +62,15 @@ def get_list_data(listfileurl,logfile=None,overwrite=False,verbose=False):
         ds_md5=getmd5sum(os.path.join(basedir,b[0]))
         if not ds_md5==b[1]:
             print 'md5sum does not match for ',b[0],ds_md5
-        if logfile:
+        try:
             open(logfile,'a').write('%s\n'%'\t'.join(b))
+        except:
+            print 'problem with logging...'
 
  
-def get_directory(d):
+def get_directory(d,dataurl=dataurl,logfile=os.path.join(basedir,'logs'),skip=[],overwrite=False,verbose=False):
     assert dirname_listdict.has_key(d)
-    get_list_data(dirname_listdict[d])
+    get_list_data(dirname_listdict[d],dataurl,logfile,skip,overwrite,verbose)
     
 def get_base_data(overwrite=False):
          
@@ -75,7 +79,7 @@ def get_base_data(overwrite=False):
         os.mkdir(logdir)
     logfile=os.path.join(logdir,'data_downloads.log')
     print 'getting data for main analysis...'
-    get_list_data(basefileurl,logfile=logfile,overwrite=overwrite)
+    get_list_data(basefileurl,dataurl,logfile)
 
   
 def usage():
@@ -86,17 +90,18 @@ def usage():
 def main(argv):
     
         
-        
+    global dataurl
+    global basefileurl
     try:
         assert os.path.exists(basedir)
     except:
         print 'creating base directory:',basedir
         os.mkdir(basedir)
-
+    skip=[]
     overwrite=False
     try:
         # right now only the base option is implemented
-        opts, args = getopt.getopt(argv,"bo",['base'])
+        opts, args = getopt.getopt(argv,"bao",['base','all','skip-htcount','skip-rsfmri'])
     except getopt.GetoptError:
         usage()
     if len(opts)==0:
@@ -108,8 +113,16 @@ def main(argv):
         if opt == '-o':
             overwrite=True
             print 'overwriting older data'
-        if opt == '--base':
+        if opt == '--skip-rsfmri':
+            skip.append('combined_data_scrubbed')
+            print 'skipping rsfmri timeseries data'
+        if opt == '--skip-htcount':
+            skip.append('htcount')
+            print 'skipping htcount data'
+        if opt == '--base' or opt == '-b':
             data_to_get.append('base')
+        if opt == '--all' or opt=='-a':
+            data_to_get.append('all')
     
     logdir=os.path.join(basedir,'logs')
     if not os.path.exists(logdir):
@@ -117,8 +130,13 @@ def main(argv):
     logfile=os.path.join(logdir,'data_downloads.log')
     
     if 'base' in data_to_get:
-        print 'getting data for main analysis...'
-        get_list_data(basefileurl,logfile=logfile,overwrite=overwrite)
+        print 'getting base starting data for main analysis...'
+        get_list_data(basefileurl,dataurl,logfile,skip,overwrite)
+        
+    if 'all' in data_to_get:
+        basefileurl=dataurl+'/myconnectome_md5.txt'
+        print 'getting all data and results for main analysis...'
+        get_list_data(basefileurl,dataurl,logfile,skip,overwrite)
         
 if __name__ == "__main__":
    main(sys.argv[1:])
